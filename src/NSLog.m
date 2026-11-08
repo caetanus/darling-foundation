@@ -9,6 +9,10 @@
 #import "CFInternal.h"
 #import <Foundation/NSException.h>
 #include <sys/time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 typedef void (*CFLogFunc)(int32_t lev, const char *message, size_t length, char withBanner);
 
@@ -33,7 +37,17 @@ static void __NSLogCString(int32_t lev, const char *message, size_t length, char
     millis = (1000 * tod.tv_usec / USEC_PER_SEC);
     strftime(dateFormat, 80, "%Y-%m-%d %T", timeinfo);
 
-    if (message[length - 1] == '\n')
+    // OSXER LOG (stderr): preserve stdout and mirror before any buffered output.
+    const char *mirror = getenv("OSXER_LOG_STDERR");
+    if (!issetugid() && mirror && strcmp(mirror, "1") == 0)
+    {
+        fprintf(stderr, "%s.%03d %s[%d:%x] %.*s%s", dateFormat, millis,
+                processName, pid, uid, (int)length, message,
+                length && message[length - 1] == '\n' ? "" : "\n");
+        fflush(stderr);
+    }
+
+    if (length && message[length - 1] == '\n')
     {
         printf("%s.%03d %s[%d:%x] %.*s", dateFormat, millis, processName, pid, uid, (int)length, message);
     }
