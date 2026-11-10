@@ -92,8 +92,19 @@ CF_PRIVATE
 
 static void _NSFileHandleRaiseOperationException(id object, SEL selector)
 {
-    [NSException raise:@"NSFileHandleOperationException" format:@"%@: %s", _NSMethodExceptionProem(object, selector),
-        errno ? strerror(errno) : "unknown error"];
+    // OSXER APPKIT (file errors): save errno before formatting can change it.
+    int code = errno ? errno : EIO;
+    NSError *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:code userInfo:nil];
+    @throw [NSException exceptionWithName:NSFileHandleOperationException
+        reason:[NSString stringWithFormat:@"%@: %s", _NSMethodExceptionProem(object, selector), strerror(code)]
+        userInfo:@{NSUnderlyingErrorKey:error}];
+}
+
+// OSXER APPKIT (file errors): subclasses may still raise legacy exceptions.
+static NSError *OSXERFileHandleError(NSException *exception)
+{
+    NSError *error = [[exception userInfo] objectForKey:NSUnderlyingErrorKey];
+    return error ?: [NSError errorWithDomain:NSPOSIXErrorDomain code:(errno ?: EIO) userInfo:nil];
 }
 
 static int _NSOpenFileDescriptor(const char *path, int flags, NSInteger createMode)
@@ -382,6 +393,35 @@ static NSError *_NSErrorWithFilePath(int code, id path)
     return [NSFileHandle self];
 }
 
+// OSXER APPKIT (file errors): preserve the legacy subclass I/O path.
+- (NSData *)readDataUpToLength:(NSUInteger)length error:(NSError **)error
+{
+    @try { return [self readDataOfLength:length]; }
+    @catch (NSException *exception) {
+        if (![[exception name] isEqual:NSFileHandleOperationException]) @throw;
+        if (error) *error = OSXERFileHandleError(exception);
+        return nil;
+    }
+}
+- (BOOL)writeData:(NSData *)data error:(NSError **)error
+{
+    @try { [self writeData:data]; return YES; }
+    @catch (NSException *exception) {
+        if (![[exception name] isEqual:NSFileHandleOperationException]) @throw;
+        if (error) *error = OSXERFileHandleError(exception);
+        return NO;
+    }
+}
+- (BOOL)closeAndReturnError:(NSError **)error
+{
+    @try { [self closeFile]; return YES; }
+    @catch (NSException *exception) {
+        if (![[exception name] isEqual:NSFileHandleOperationException]) @throw;
+        if (error) *error = OSXERFileHandleError(exception);
+        return NO;
+    }
+}
+
 - (NSData *)availableData
 {
     NSRequestConcreteImplementation();
@@ -474,6 +514,8 @@ static NSError *_NSErrorWithFilePath(int code, id path)
 #define FAIL_IF_CLOSED(retval) \
 if ((_flags & NSConcreteFileHandleClosed) != 0) \
 { \
+    /* OSXER APPKIT (file errors): deterministic closed-descriptor error. */ \
+    errno = EBADF; \
     FAIL(); \
     return retval; \
 }
@@ -571,7 +613,17 @@ if ((_flags & NSConcreteFileHandleClosed) != 0) \
 
 - (NSData *)readDataToEndOfFile
 {
-    return [self readDataOfLength:(NSUInteger)-1];
+    // OSXER APPKIT (channel reads): read-to-end explicitly waits for EOF.
+    NSMutableData *result = [NSMutableData data];
+    for (;;) {
+        BOOL finished;
+        @autoreleasepool {
+            NSData *part = [self readDataOfLength:65536];
+            finished = ![part length];
+            [result appendData:part];
+        }
+        if (finished) return result;
+    }
 }
 
 - (NSData *)readDataOfLength:(NSUInteger)length
@@ -619,47 +671,24 @@ if ((_flags & NSConcreteFileHandleClosed) != 0) \
                 FAIL();
                 return nil;
             }
+            // OSXER APPKIT (file reads): files may shrink during a read.
+            if (readSize == 0) break;
             totalReadSize += readSize;
             remainingSize -= readSize;
         } while (remainingSize > 0);
-        return [NSData dataWithBytesNoCopy:buf length:dataSize];
+        return [NSData dataWithBytesNoCopy:buf length:totalReadSize];
     }
     else
     {
-        const size_t READ_SIZE = MIN(4096, length);
-        size_t totalReadSize = 0;
-        size_t bufSize = READ_SIZE;
-        char *buf = malloc(bufSize);
-        if (buf == NULL)
-        {
-            FAIL();
-            return nil;
-        }
-        ssize_t readSize;
-        do {
-            size_t maxReadSize = MIN(READ_SIZE, bufSize) - totalReadSize;
-            readSize = _NSReadFromFileDescriptor(_fd, buf + totalReadSize, maxReadSize);
-            if (readSize < 0)
-            {
-                free(buf);
-                FAIL();
-                return nil;
-            }
-            totalReadSize += readSize;
-            if (totalReadSize + READ_SIZE > bufSize)
-            {
-                char *oldBuf = buf;
-                bufSize *= 2;
-                buf = realloc(buf, bufSize);
-                if (buf == NULL)
-                {
-                    free(oldBuf);
-                    FAIL();
-                    return nil;
-                }
-            }
-        } while (readSize > 0);
-        return [NSData dataWithBytesNoCopy:buf length:totalReadSize];
+        // OSXER APPKIT (channel reads): one bounded read may return fewer bytes;
+        // do not wait for the writer to close a pipe or socket.
+        if (length == 0) return [NSData data];
+        size_t capacity = MIN((NSUInteger)65536, length);
+        void *buffer = malloc(capacity);
+        if (!buffer) { errno = ENOMEM; FAIL(); return nil; }
+        ssize_t count = _NSReadFromFileDescriptor(_fd, buffer, capacity);
+        if (count < 0) { int saved = errno; free(buffer); errno = saved; FAIL(); return nil; }
+        return [NSData dataWithBytesNoCopy:buffer length:(NSUInteger)count];
     }
 }
 
@@ -732,7 +761,8 @@ if ((_flags & NSConcreteFileHandleClosed) != 0) \
 
     _flags |= NSConcreteFileHandleClosed;
     [self _cancelDispatchSources];
-    _NSCloseFileDescriptor(_fd);
+    // OSXER APPKIT (file errors): surface close errors through both APIs.
+    if (close(_fd) < 0) { FAIL(); }
 }
 
 - (void (^)(NSFileHandle *))readabilityHandler

@@ -157,6 +157,12 @@ OBJC_PROTOCOL_IMPL_PUSH
     return _CFURLIsFileURL([self _cfurl]);
 }
 
+// OSXER APPKIT (URL directory syntax): no filesystem lookup.
+- (BOOL)hasDirectoryPath
+{
+    return CFURLHasDirectoryPath([self _cfurl]);
+}
+
 - (NSString *)fragment
 {
     return [(NSString *)CFURLCopyFragment([self _cfurl], NULL) autorelease];

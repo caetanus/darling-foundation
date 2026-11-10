@@ -38,6 +38,8 @@ enum {
 - (BOOL)isSupersetOfSet:(NSCharacterSet *)other;
 - (BOOL)hasMemberInPlane:(uint8_t)plane;
 
+// OSXER APPKIT (public compatibility)
++ (NSCharacterSet *)URLQueryAllowedCharacterSet;
 @end
 
 @interface NSMutableCharacterSet : NSCharacterSet <NSCopying, NSMutableCopying>

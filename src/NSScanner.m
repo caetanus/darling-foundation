@@ -13,6 +13,10 @@
 #import <Foundation/NSString.h>
 #import <Foundation/NSDecimal.h>
 #import <Foundation/NSDecimalNumber.h>
+// OSXER APPKIT (hexadecimal floating point): use the libc conversion layer.
+#include <stdlib.h>
+#include <string.h>
+#include <xlocale.h>
 
 #ifndef ULONG_LONG_MAX
 #	define ULONG_LONG_MAX 0xffffffffffffffffull
@@ -764,6 +768,31 @@ static inline NSUInteger skipSkipSet(NSScanner *self, NSString *s)
         [number release];
     }
     return scanned;
+}
+
+// OSXER APPKIT (hexadecimal floating point)
+// https://developer.apple.com/documentation/foundation/scanner/scanhexdouble(_:)
+- (BOOL)scanHexDouble:(double *)value
+{
+    NSString *string = [self string];
+    NSUInteger start = [self scanLocation], length = [string length];
+    NSCharacterSet *skip = [self charactersToBeSkipped];
+    while (start < length && [skip characterIsMember:[string characterAtIndex:start]]) ++start;
+    const char *input = [[string substringFromIndex:start] UTF8String];
+    if (!input) return NO;
+    const char *prefix = input;
+    if (*prefix == '+' || *prefix == '-') ++prefix;
+    if (strlen(prefix) < 3 || prefix[0] != '0' || (prefix[1] != 'x' && prefix[1] != 'X')) return NO;
+    locale_t numericLocale = newlocale(LC_NUMERIC_MASK, "C", NULL);
+    if (!numericLocale) return NO;
+    char *end;
+    double result = strtod_l(input, &end, numericLocale);
+    freelocale(numericLocale);
+    if (end <= prefix + 2) return NO;
+    // Accepted syntax is ASCII, so the consumed byte count is also UTF-16 length.
+    [self setScanLocation:start + (NSUInteger)(end - input)];
+    if (value) *value = result;
+    return YES;
 }
 
 - (BOOL)scanFloat:(float *)value

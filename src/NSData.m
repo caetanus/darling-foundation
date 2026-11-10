@@ -1083,6 +1083,17 @@ OBJC_PROTOCOL_IMPL_POP
     block([self bytes], NSMakeRange(0, [self length]), &stop);
 }
 
+// OSXER APPKIT (legacy Base64): deprecated entry points share the modern codec.
+- (id)initWithBase64Encoding:(NSString *)string
+{
+    return [self initWithBase64EncodedString:string options:NSDataBase64DecodingIgnoreUnknownCharacters];
+}
+
+- (NSString *)base64Encoding
+{
+    return [self base64EncodedStringWithOptions:0];
+}
+
 - (id)initWithBase64EncodedString:(NSString *)base64String options:(NSDataBase64DecodingOptions)options
 {
     return [self initWithBase64EncodedData:[base64String dataUsingEncoding:NSASCIIStringEncoding] options:options];
@@ -1090,7 +1101,8 @@ OBJC_PROTOCOL_IMPL_POP
 
 - (NSString *)base64EncodedStringWithOptions:(NSDataBase64EncodingOptions)options
 {
-    return [[NSString alloc] initWithData:[self base64EncodedDataWithOptions:options] encoding:NSASCIIStringEncoding];
+    // OSXER APPKIT (Base64 ownership): convenience result is autoreleased.
+    return [[[NSString alloc] initWithData:[self base64EncodedDataWithOptions:options] encoding:NSASCIIStringEncoding] autorelease];
 }
 
 #define xx 65 // xx is used to mark invalid Base64 characters

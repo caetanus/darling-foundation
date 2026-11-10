@@ -17,25 +17,82 @@
  along with Darling.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+// OSXER APPKIT (layout): see Foundation/NSLayoutConstraint.h. Replaces a forwarding stub
+// that swallowed every message.
 #import <Foundation/NSLayoutConstraint.h>
-#import <Foundation/NSMethodSignature.h>
-#import <Foundation/NSInvocation.h>
-
-#warning TODO: $ld$hide$os 10.4 through 10.7, also METACLASS
+#import <Foundation/NSCoder.h>
+#import <Foundation/NSException.h>
+#import <Foundation/NSString.h>
 
 @implementation NSLayoutConstraint
+@synthesize firstItem = _firstItem, secondItem = _secondItem;
+@synthesize firstAttribute = _firstAttribute, secondAttribute = _secondAttribute;
+@synthesize relation = _relation, multiplier = _multiplier;
+@synthesize constant = _constant, priority = _priority, identifier = _identifier;
 
-- (NSMethodSignature *)methodSignatureForSelector:(SEL)aSelector {
-    return [NSMethodSignature signatureWithObjCTypes: "v@:"];
-}
-
-- (id)initWithCoder:(NSCoder *)coder {
-    NSLog(@"Stub called: initWithCoder in NSLayoutConstraint");
+- (id)init
+{
+    if ((self = [super init])) {
+        _priority = NSLayoutPriorityRequired;
+        _multiplier = 1;
+    }
     return self;
 }
 
-- (void)forwardInvocation:(NSInvocation *)anInvocation {
-    NSLog(@"Stub called: %@ in %@", NSStringFromSelector([anInvocation selector]), [self class]);
+- (void)dealloc
+{
+    [_identifier release];
+    [super dealloc];
 }
+
++ (instancetype)constraintWithItem:(id)first attribute:(NSLayoutAttribute)firstAttribute
+    relatedBy:(NSLayoutRelation)relation toItem:(id)second attribute:(NSLayoutAttribute)secondAttribute
+    multiplier:(CGFloat)multiplier constant:(CGFloat)constant
+{
+    if (!first || firstAttribute == NSLayoutAttributeNotAnAttribute ||
+        (!second && (secondAttribute != NSLayoutAttributeNotAnAttribute ||
+          (firstAttribute != NSLayoutAttributeWidth && firstAttribute != NSLayoutAttributeHeight))))
+        [NSException raise:NSInvalidArgumentException format:@"Invalid constraint items or attributes"];
+    NSLayoutConstraint *result = [[[self alloc] init] autorelease];
+    result->_firstItem = first; result->_secondItem = second;
+    result->_firstAttribute = firstAttribute; result->_secondAttribute = secondAttribute;
+    result->_relation = relation; result->_multiplier = multiplier; result->_constant = constant;
+    return result;
+}
+
+// Nibs archive constraints with these keys; items are views of the same nib (not retained,
+// like the properties). Absent keys keep the defaults of -init.
+- (id)initWithCoder:(NSCoder *)coder
+{
+    if (!(self = [self init])) return nil;
+    if (![coder allowsKeyedCoding]) return self;
+    _firstItem = [coder decodeObjectForKey:@"NSFirstItem"];
+    _secondItem = [coder decodeObjectForKey:@"NSSecondItem"];
+    _firstAttribute = [coder decodeIntegerForKey:@"NSFirstAttribute"];
+    _secondAttribute = [coder decodeIntegerForKey:@"NSSecondAttribute"];
+    _relation = [coder decodeIntegerForKey:@"NSRelation"];
+    if ([coder containsValueForKey:@"NSMultiplier"]) _multiplier = [coder decodeDoubleForKey:@"NSMultiplier"];
+    if ([coder containsValueForKey:@"NSConstant"]) _constant = [coder decodeDoubleForKey:@"NSConstant"];
+    if ([coder containsValueForKey:@"NSPriority"]) _priority = [coder decodeIntegerForKey:@"NSPriority"];
+    _identifier = [[coder decodeObjectForKey:@"NSLayoutIdentifier"] copy];
+    return self;
+}
+
+- (void)encodeWithCoder:(NSCoder *)coder
+{
+    if (![coder allowsKeyedCoding]) return;
+    [coder encodeConditionalObject:_firstItem forKey:@"NSFirstItem"];
+    [coder encodeConditionalObject:_secondItem forKey:@"NSSecondItem"];
+    [coder encodeInteger:_firstAttribute forKey:@"NSFirstAttribute"];
+    [coder encodeInteger:_secondAttribute forKey:@"NSSecondAttribute"];
+    [coder encodeInteger:_relation forKey:@"NSRelation"];
+    [coder encodeDouble:_multiplier forKey:@"NSMultiplier"];
+    [coder encodeDouble:_constant forKey:@"NSConstant"];
+    [coder encodeInteger:(NSInteger)_priority forKey:@"NSPriority"];
+    if (_identifier) [coder encodeObject:_identifier forKey:@"NSLayoutIdentifier"];
+}
+
+- (id)_osxerOwner { return _osxerOwner; }
+- (void)_osxerSetOwner:(id)view { _osxerOwner = view; }
 
 @end

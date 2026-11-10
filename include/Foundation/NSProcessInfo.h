@@ -58,6 +58,11 @@ typedef NS_ENUM(NSInteger, NSProcessInfoThermalState) {
 - (BOOL)isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion)version;
 @property (readonly) NSProcessInfoThermalState thermalState;
 
+// OSXER APPKIT (public compatibility)
+- (void)disableAutomaticTermination:(NSString *)reason;
+- (void)enableAutomaticTermination:(NSString *)reason;
+- (void)disableSuddenTermination;
+- (void)enableSuddenTermination;
 @end
 
 @interface NSProcessInfo (NSProcessInfoPlatform)

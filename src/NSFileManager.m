@@ -20,6 +20,8 @@
 
 #import <Foundation/NSURL.h>
 #import <Foundation/NSData.h>
+// OSXER APPKIT (file equality): use the Foundation streaming API.
+#import <Foundation/NSFileHandle.h>
 #import <Foundation/NSDate.h>
 #import <Foundation/NSError.h>
 #import <Foundation/NSSet.h>
@@ -865,6 +867,48 @@ static NSError *_NSErrorWithFilePathAndErrno(id path, int code)
     return [self setAttributes:attributes ofItemAtPath:path error:nil];
 }
 
+// OSXER APPKIT (file equality): compare links themselves, recurse into directories,
+// and stream regular files so large files do not require a matching RAM allocation.
+- (BOOL)contentsEqualAtPath:(NSString *)first andPath:(NSString *)second
+{
+    if (!first || !second) return NO;
+    struct stat a, b;
+    if (lstat([first fileSystemRepresentation], &a) || lstat([second fileSystemRepresentation], &b)) return NO;
+    if ((a.st_mode & S_IFMT) != (b.st_mode & S_IFMT)) return NO;
+    if (a.st_dev == b.st_dev && a.st_ino == b.st_ino) return YES;
+    if (S_ISLNK(a.st_mode)) {
+        NSString *target = [self destinationOfSymbolicLinkAtPath:first error:NULL];
+        return target && [target isEqual:[self destinationOfSymbolicLinkAtPath:second error:NULL]];
+    }
+    if (S_ISDIR(a.st_mode)) {
+        NSArray *left = [self contentsOfDirectoryAtPath:first error:NULL];
+        NSArray *right = [self contentsOfDirectoryAtPath:second error:NULL];
+        if (!left || !right || ![[NSSet setWithArray:left] isEqual:[NSSet setWithArray:right]]) return NO;
+        for (NSString *name in left)
+            if (![self contentsEqualAtPath:[first stringByAppendingPathComponent:name]
+                                  andPath:[second stringByAppendingPathComponent:name]]) return NO;
+        return YES;
+    }
+    if (!S_ISREG(a.st_mode) || a.st_size != b.st_size) return NO;
+    NSFileHandle *left = [NSFileHandle fileHandleForReadingAtPath:first];
+    NSFileHandle *right = [NSFileHandle fileHandleForReadingAtPath:second];
+    if (!left || !right) { [left closeAndReturnError:NULL]; [right closeAndReturnError:NULL]; return NO; }
+    BOOL equal = YES;
+    @try {
+        for (;;) {
+            BOOL finished = NO;
+            @autoreleasepool {
+                NSData *x = [left readDataUpToLength:65536 error:NULL];
+                NSData *y = [right readDataUpToLength:65536 error:NULL];
+                if (!x || !y || ![x isEqual:y]) { equal = NO; finished = YES; }
+                else finished = ![x length];
+            }
+            if (finished) break;
+        }
+    } @finally { [left closeAndReturnError:NULL]; [right closeAndReturnError:NULL]; }
+    return equal;
+}
+
 - (NSArray *)contentsOfDirectoryAtPath:(NSString *)path error:(NSError **)error
 {
     return [self directoryContentsAtPath:path matchingExtension:nil options:0 keepExtension:YES error:error];
@@ -906,8 +950,11 @@ static NSError *_NSErrorWithFilePathAndErrno(id path, int code)
 
 - (NSString *)destinationOfSymbolicLinkAtPath:(NSString *)path error:(NSError **)error
 {
-    char resolved[PATH_MAX];
-    if (realpath([path fileSystemRepresentation], resolved) == NULL)
+    // OSXER APPKIT (symlinks): the link's own contents, like Apple, not the fully resolved
+    // path: realpath() failed on dangling links and resolved whole chains.
+    char target[PATH_MAX];
+    ssize_t length = readlink([path fileSystemRepresentation], target, sizeof(target) - 1);
+    if (length < 0)
     {
         if (error)
         {
@@ -917,7 +964,7 @@ static NSError *_NSErrorWithFilePathAndErrno(id path, int code)
         }
         return nil;
     }
-    return [NSString stringWithUTF8String:resolved];
+    return [self stringWithFileSystemRepresentation:target length:length];
 }
 
 

@@ -168,6 +168,8 @@ FOUNDATION_EXPORT NSString * const NSFileSystemFreeNodes;
 - (NSURL *)URLForPublishingUbiquitousItemAtURL:(NSURL *)url expirationDate:(NSDate **)outDate error:(NSError **)error;
 - (id <NSObject, NSCopying, NSCoding>)ubiquityIdentityToken;
 
+// OSXER APPKIT (file equality)
+- (BOOL)contentsEqualAtPath:(NSString *)first andPath:(NSString *)second;
 @end
 
 @interface NSObject (NSCopyLinkMoveHandler)

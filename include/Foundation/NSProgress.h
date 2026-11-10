@@ -18,6 +18,8 @@ FOUNDATION_EXPORT NSString * const NSProgressFileAnimationImageOriginalRectKey;
 FOUNDATION_EXPORT NSString * const NSProgressFileIconKey;
 
 @interface NSProgress : NSObject {
+	// OSXER APPKIT (progress kind)
+	NSString *_kind;
 	void (^_cancellationHandler)(void);
 	void (^_pausingHandler)(void);
 	void (^_resumingHandler)(void);
@@ -41,6 +43,8 @@ FOUNDATION_EXPORT NSString * const NSProgressFileIconKey;
 @property(getter=isPausable) BOOL pausable;
 @property int64_t completedUnitCount;
 @property int64_t totalUnitCount;
+// OSXER APPKIT (progress kind)
+@property(copy) NSString *kind;
 
 @property(copy) void (^cancellationHandler)(void);
 @property(copy) void (^pausingHandler)(void);

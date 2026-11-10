@@ -28,6 +28,9 @@ NSString * const NSProgressFileIconKey = @"NSProgressFileIconKey";
 // also, the self-synchronization in basically every method is pretty inefficient
 @implementation NSProgress
 
+// OSXER APPKIT (progress kind): descriptive metadata, independent of publication.
+@synthesize kind = _kind;
+
 @synthesize cancellationHandler = _cancellationHandler;
 @synthesize pausingHandler = _pausingHandler;
 @synthesize resumingHandler = _resumingHandler;
@@ -49,6 +52,7 @@ NSString * const NSProgressFileIconKey = @"NSProgressFileIconKey";
 
 - (void)dealloc
 {
+    [_kind release]; // OSXER APPKIT (progress kind)
     [_cancellationHandler release];
     [_pausingHandler release];
     [_resumingHandler release];

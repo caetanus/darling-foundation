@@ -146,6 +146,8 @@ static CFKeyedArchiverUIDRef _NSKeyedArchiverUIDCreateCached(NSKeyedArchiver *ar
 #warning TODO find CFRelease point for UID cache
 }
 
+static void resolveConditionals(NSKeyedArchiver *archiver, id object, CFKeyedArchiverUIDRef uid);
+
 static void _encodeObject(NSKeyedArchiver *archiver, id object, NSString *key)
 {
     BOOL visited = NO;
@@ -195,15 +197,12 @@ static void _encodeObject(NSKeyedArchiver *archiver, id object, NSString *key)
         }
         else
         {
-            if (CFDictionaryGetValueIfPresent(archiver->_conditionals, object, (const void **)&mapObject))
-            {
-                // TODO
-            }
             CFArrayAppendValue((CFMutableArrayRef)archiver->_objects, @"$null"); // placeholder
             CFDictionarySetValue(archiver->_objRefMap, object, (const void *)end);
             uidIndex = end;
         }
         CFKeyedArchiverUIDRef cka = _NSKeyedArchiverUIDCreateCached(archiver, uidIndex);
+        resolveConditionals(archiver, object, cka);
         encodeFinalValue(archiver, (id)cka, key);
         CFRelease(cka);
 
@@ -311,10 +310,55 @@ static void _encodeObject(NSKeyedArchiver *archiver, id object, NSString *key)
     }
 }
 
+// OSXER APPKIT (conditional objects): a conditional reference is written as nil ($null, UID 0)
+// and remembered as (container, key) in _conditionals; when the object is later encoded
+// unconditionally, _encodeObject rewrites those entries with its UID. One never encoded stays
+// nil, as on macOS. (This used to be DEBUG_BREAK: any NSView subclass archiving an outlet
+// with encodeConditionalObject: crashed with SIGILL.)
 static void encodeConditionalObject(NSKeyedArchiver *archiver, id object, NSString *key)
 {
-#warning TODO
-    DEBUG_BREAK();
+    id replacement = nil;
+    if (object && CFDictionaryGetValueIfPresent(archiver->_replacementMap, object, (const void **)&replacement) && replacement)
+    {
+        object = replacement;
+    }
+    id mapObject;
+    if (object == nil || CFDictionaryGetValueIfPresent(archiver->_objRefMap, object, (const void **)&mapObject))
+    {
+        _encodeObject(archiver, object, key); // nil, or already encoded: a plain reference
+        return;
+    }
+    CFKeyedArchiverUIDRef null = _NSKeyedArchiverUIDCreateCached(archiver, 0);
+    encodeFinalValue(archiver, (id)null, key);
+    CFRelease(null);
+    NSMutableArray *pending = nil;
+    if (!CFDictionaryGetValueIfPresent(archiver->_conditionals, object, (const void **)&pending))
+    {
+        pending = [NSMutableArray new]; // owned by _conditionals (no value callbacks)
+        CFDictionarySetValue(archiver->_conditionals, object, pending);
+    }
+    [pending addObject:[archiver->_containers lastObject]];
+    [pending addObject:key];
+}
+
+static void releasePending(const void *key, const void *value, void *context)
+{
+    [(id)value release];
+}
+
+static void resolveConditionals(NSKeyedArchiver *archiver, id object, CFKeyedArchiverUIDRef uid)
+{
+    NSMutableArray *pending = nil;
+    if (!CFDictionaryGetValueIfPresent(archiver->_conditionals, object, (const void **)&pending))
+    {
+        return;
+    }
+    for (NSUInteger i = 0; i + 1 < [pending count]; i += 2)
+    {
+        [[pending objectAtIndex:i] setObject:(id)uid forKey:[pending objectAtIndex:i + 1]];
+    }
+    CFDictionaryRemoveValue(archiver->_conditionals, object);
+    [pending release];
 }
 
 static void encodeBytes(NSKeyedArchiver *archiver, const uint8_t *buffer, NSUInteger len, NSString *key)
@@ -592,6 +636,8 @@ static void _release(CFAllocatorRef allocator, const void *value)
     [_containers release];
     [_objects release];
     CFRelease(_objRefMap);
+    // OSXER APPKIT (conditional objects): references to objects that were never encoded.
+    CFDictionaryApplyFunction(_conditionals, releasePending, NULL);
     CFRelease(_conditionals);
     if (_visited != nil)
     {

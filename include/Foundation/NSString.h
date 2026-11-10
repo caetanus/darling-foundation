@@ -80,6 +80,10 @@ FOUNDATION_EXPORT NSString * const NSCharacterConversionException;
 
 - (unichar)characterAtIndex:(NSUInteger)index;
 
+// OSXER APPKIT (public compatibility)
+- (NSString *)stringByAddingPercentEncodingWithAllowedCharacters:(NSCharacterSet *)allowed;
+// OSXER APPKIT (public compatibility)
+- (NSString *)localizedCapitalizedString;
 @end
 
 @interface NSString (NSStringExtensionMethods)

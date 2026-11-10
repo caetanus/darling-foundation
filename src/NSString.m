@@ -1416,6 +1416,9 @@ SINGLETON_RR()
 /*!
  @note     Returns mutable
  */
+// OSXER APPKIT (localized capitalization): use the existing locale-aware implementation.
+- (NSString *)localizedCapitalizedString { return [self capitalizedStringWithLocale:[NSLocale currentLocale]]; }
+
 - (NSString *)capitalizedString
 {
     return [self capitalizedStringWithLocale:nil];
@@ -2479,6 +2482,26 @@ static BOOL _NSScanStringValue(NSString *self, NSNumericValueType type, NSNumeri
 - (NSUInteger)cStringLength
 {
     return [self lengthOfBytesUsingEncoding:__NSDefaultCStringEncoding()];
+}
+
+// OSXER APPKIT (percent encoding): only ASCII membership survives; encode UTF-8.
+- (NSString *)stringByAddingPercentEncodingWithAllowedCharacters:(NSCharacterSet *)allowed
+{
+    if (!allowed) [NSException raise:NSInvalidArgumentException format:@"Missing allowed character set"];
+    NSData *utf8 = [self dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:NO];
+    if (!utf8) return nil;
+    NSMutableData *encoded = [NSMutableData data];
+    const unsigned char *bytes = [utf8 bytes];
+    const char hex[] = "0123456789ABCDEF";
+    for (NSUInteger i = 0; i < [utf8 length]; ++i) {
+        unsigned char b = bytes[i];
+        if (b < 128 && [allowed characterIsMember:b]) [encoded appendBytes:&b length:1];
+        else {
+            char escape[] = {'%', hex[b >> 4], hex[b & 15]};
+            [encoded appendBytes:escape length:3];
+        }
+    }
+    return [[[NSString alloc] initWithData:encoded encoding:NSASCIIStringEncoding] autorelease];
 }
 
 - (NSString *) stringByRemovingPercentEncoding

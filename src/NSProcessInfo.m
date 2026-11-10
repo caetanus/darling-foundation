@@ -34,7 +34,25 @@ extern char ***_NSGetEnviron();
  guaranteed to be stable across all threads; ala setenv etc.
  */
 
+// OSXER APPKIT (termination): use CoreFoundation's shared process counter.
+#import <CoreFoundation/ForFoundationOnly.h>
+
 @implementation NSProcessInfo
+
+// OSXER APPKIT (termination): automatic termination has no host policy engine;
+// maintain the opt-out counter so activity state remains balanced.
+- (void)disableAutomaticTermination:(NSString *)reason
+{
+    @synchronized(self) { ++automaticTerminationOptOutCounter; }
+}
+- (void)enableAutomaticTermination:(NSString *)reason
+{
+    @synchronized(self) {
+        if (automaticTerminationOptOutCounter > 0) --automaticTerminationOptOutCounter;
+    }
+}
+- (void)disableSuddenTermination { _CFSuddenTerminationDisable(); }
+- (void)enableSuddenTermination { _CFSuddenTerminationEnable(); }
 
 + (NSProcessInfo *)processInfo
 {

@@ -128,6 +128,9 @@ typedef struct offsetDataStruct offsetDataStruct;
 - (double)decodeDoubleForKey:(NSString *)key;
 - (const uint8_t *)decodeBytesForKey:(NSString *)key returnedLength:(NSUInteger *)lengthp NS_RETURNS_INNER_POINTER;
 
+// OSXER APPKIT (secure convenience)
++ (id)unarchivedObjectOfClass:(Class)cls fromData:(NSData *)data error:(NSError **)error;
++ (id)unarchivedObjectOfClasses:(NSSet *)classes fromData:(NSData *)data error:(NSError **)error;
 @end
 
 @interface NSObject (NSKeyedArchiverObjectSubstitution)

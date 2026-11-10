@@ -26,6 +26,10 @@ FOUNDATION_EXPORT NSString * const NSFileHandleNotificationMonitorModes;
 - (void)synchronizeFile;
 - (void)closeFile;
 
+// OSXER APPKIT (public compatibility)
+- (NSData *)readDataUpToLength:(NSUInteger)length error:(NSError **)error;
+- (BOOL)writeData:(NSData *)data error:(NSError **)error;
+- (BOOL)closeAndReturnError:(NSError **)error;
 @end
 
 @interface NSFileHandle (NSFileHandleCreation)

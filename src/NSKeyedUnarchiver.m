@@ -24,6 +24,17 @@
 #import <objc/runtime.h>
 #import <stdlib.h>
 
+#import <Foundation/NSError.h>
+#import <Foundation/FoundationErrors.h>
+// OSXER APPKIT (secure convenience): NSError API below uses the existing decoder.
+// OSXER APPKIT (secure decoding): check before allocating a decoded class;
+// allowed superclasses include subclasses, but NSSecureCoding is mandatory.
+static BOOL OSXERAllowedSecureClass(Class cls, NSSet *allowed) {
+    if (![cls respondsToSelector:@selector(supportsSecureCoding)] || ![cls supportsSecureCoding]) return NO;
+    for (Class candidate in allowed) if ([cls isSubclassOfClass:candidate]) return YES;
+    return NO;
+}
+
 static NSMutableDictionary *archiverClasses = nil;
 
 NSString *const NSInvalidUnarchiveOperationException = @"NSInvalidUnarchiveOperationException";
@@ -559,7 +570,7 @@ static id _decodeObjectBinary(NSKeyedUnarchiver *unarchiver, NSUInteger uid1) NS
         if ([unarchiver requiresSecureCoding])
         {
             NSSet *allowedClassSet = [unarchiver allowedClasses];
-            if (![allowedClassSet containsObject:class]) {
+            if (!OSXERAllowedSecureClass(class, allowedClassSet)) {
                 exception = [NSException exceptionWithName:NSInvalidUnarchiveOperationException
                                         reason:[NSString stringWithFormat:@"%@ was unexpected. The expected classes are %@", className, allowedClassSet]
                                       userInfo: @{@"__NSCoderInternalErrorCode" : @4864}];
@@ -713,7 +724,7 @@ static id _decodeObjectXML(NSKeyedUnarchiver *unarchiver, NSString *key)
     if ([unarchiver requiresSecureCoding])
     {
         NSSet *allowedClassSet = [unarchiver allowedClasses];
-        if (![allowedClassSet containsObject:class]) {
+        if (!OSXERAllowedSecureClass(class, allowedClassSet)) {
             [[NSException exceptionWithName:NSInvalidUnarchiveOperationException
                                     reason:[NSString stringWithFormat:@"%@ was unexpected. The expected classes are %@", className, allowedClassSet]
                                     userInfo: @{@"__NSCoderInternalErrorCode" : @4864} ] raise];
@@ -824,6 +835,36 @@ static void setClassForClassName(Class cls, NSString *codedName)
 + (void)setClass:(Class)cls forClassName:(NSString *)codedName
 {
     setClassForClassName(cls, codedName);
+}
+
+// OSXER APPKIT (secure convenience): never fall back to insecure unarchiving.
++ (id)unarchivedObjectOfClass:(Class)cls fromData:(NSData *)data error:(NSError **)error
+{
+    return [self unarchivedObjectOfClasses:cls ? [NSSet setWithObject:cls] : [NSSet set]
+                                 fromData:data error:error];
+}
++ (id)unarchivedObjectOfClasses:(NSSet *)classes fromData:(NSData *)data error:(NSError **)error
+{
+    NSKeyedUnarchiver *decoder = nil;
+    id result = nil;
+    @try {
+        decoder = [[self alloc] initForReadingWithData:data];
+        if (!decoder) [NSException raise:NSInvalidUnarchiveOperationException format:@"Invalid archive"];
+        [decoder setRequiresSecureCoding:YES];
+        result = [[decoder decodeObjectOfClasses:classes forKey:@"root"] retain];
+        // Primitive plist values also need a root-class check.
+        if (result) {
+            BOOL allowed = NO;
+            for (Class cls in classes) if ([result isKindOfClass:cls]) { allowed = YES; break; }
+            if (!allowed) [NSException raise:NSInvalidUnarchiveOperationException format:@"Unexpected root class"];
+        }
+        [decoder finishDecoding];
+    } @catch (NSException *exception) {
+        [result release]; result = nil;
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4864
+            userInfo:@{NSLocalizedDescriptionKey:[exception reason] ?: @"Invalid archive"}];
+    } @finally { [decoder release]; }
+    return [result autorelease];
 }
 
 + (id)unarchiveObjectWithData:(NSData *)data

@@ -155,6 +155,8 @@ typedef NSUInteger NSURLBookmarkFileCreationOptions;
 - (BOOL)getFileSystemRepresentation:(char *)buffer maxLength:(NSUInteger)maxBufferLength;
 - (const char *)fileSystemRepresentation NS_RETURNS_INNER_POINTER;
 - (BOOL)isFileURL;
+// OSXER APPKIT (URL directory syntax)
+- (BOOL)hasDirectoryPath;
 - (NSURL *)standardizedURL;
 - (BOOL)checkResourceIsReachableAndReturnError:(NSError **)error;
 - (BOOL)isFileReferenceURL;

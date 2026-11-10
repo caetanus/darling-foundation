@@ -44,6 +44,9 @@ typedef NS_OPTIONS(NSUInteger, NSDataBase64DecodingOptions) {
 - (NSUInteger)length;
 - (const void *)bytes NS_RETURNS_INNER_POINTER;
 
+// OSXER APPKIT (public compatibility)
+- (id)initWithBase64Encoding:(NSString *)string;
+- (NSString *)base64Encoding;
 @end
 
 @interface NSData (NSExtendedData)
