@@ -18,6 +18,8 @@
 #import <Foundation/NSDistributedNotificationCenter.h>
 #import <Foundation/NSEnumerator.h>
 #import <Foundation/NSError.h>
+// OSXER APPS (background activity)
+#import <Foundation/NSBackgroundActivityScheduler.h>
 #import <Foundation/NSException.h>
 #import <Foundation/NSFileHandle.h>
 #import <Foundation/NSFileManager.h>

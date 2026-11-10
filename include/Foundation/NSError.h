@@ -51,3 +51,6 @@ typedef NSString *NSErrorUserInfoKey;
 - (BOOL)attemptRecoveryFromError:(NSError *)error optionIndex:(NSUInteger)recoveryOptionIndex;
 
 @end
+
+// OSXER APPS (multiple errors)
+FOUNDATION_EXPORT NSString *const NSMultipleUnderlyingErrorsKey;

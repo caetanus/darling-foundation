@@ -72,3 +72,6 @@ FOUNDATION_EXPORT void __NSInitializeProcess(int argc,const char *argv[]);
 #endif
 
 FOUNDATION_EXPORT NSString *const NSProcessInfoThermalStateDidChangeNotification;
+
+// OSXER APPS (power notification)
+FOUNDATION_EXPORT NSString *const NSProcessInfoPowerStateDidChangeNotification;

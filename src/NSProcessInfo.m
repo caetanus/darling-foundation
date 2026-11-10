@@ -406,3 +406,6 @@ void __NSInitializeProcess(int argc,const char *argv[]) {
 #endif
 
 NSString *const NSProcessInfoThermalStateDidChangeNotification = @"NSProcessInfoThermalStateDidChangeNotification";
+
+// OSXER APPS (power notification): notification name; power monitoring is not implemented.
+NSString *const NSProcessInfoPowerStateDidChangeNotification = @"NSProcessInfoPowerStateDidChangeNotification";

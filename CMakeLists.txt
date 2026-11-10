@@ -169,6 +169,8 @@ set(foundation_sources
 	src/_NSPredicateOperatorUtilities.m
 	src/_NSPredicateUtilities.m
 	src/NSProcessInfo.m
+	# OSXER APPS (background activity)
+	src/NSBackgroundActivityScheduler.m
 	src/NSProgress.m
 	src/NSProxy.m
 	src/NSRange.m
