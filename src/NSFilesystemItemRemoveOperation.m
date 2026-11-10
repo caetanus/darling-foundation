@@ -5,6 +5,7 @@
 //  Copyright (c) 2014 Apportable. All rights reserved.
 //
 
+#include <sys/stat.h>
 #import "NSFilesystemItemRemoveOperation.h"
 #import <ftw.h>
 #import <errno.h>
@@ -99,8 +100,19 @@ static int NSFilesystemItemRemoveOperationFunction(const char *path, const struc
         // extern int _nftw_context(const char *path, int (*fn)(const char *, const struct stat *, int, struct FTW *, void *), int nfds, int ftwflags, void *ctx);
         ctx = self;
 
+        // OSXER APPKIT (remove): nftw() on a path that is not a directory fails with ENOTDIR
+        // here, so removing a single file (or symlink) failed. Those need no walk: hand the
+        // item to the same callback, which keeps the delegate and error handling.
+        struct stat st;
+        if (lstat([_removePath fileSystemRepresentation], &st) == 0 && !S_ISDIR(st.st_mode))
+        {
+            NSFilesystemItemRemoveOperationFunction([_removePath fileSystemRepresentation], &st, FTW_F, NULL);
+            ctx = NULL;
+            return;
+        }
+
         int err = nftw(
-            [_removePath cString],
+            [_removePath fileSystemRepresentation], // OSXER APPKIT (remove): UTF-8, not cString
             NSFilesystemItemRemoveOperationFunction,
             1, // ignored by the implementation, but values less than 1 and
                // more than OPEN_MAX result in EINVAL

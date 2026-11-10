@@ -27,6 +27,18 @@ typedef NS_ENUM(NSInteger, NSProcessInfoThermalState) {
     NSProcessInfoThermalStateCritical = 3,
 };
 
+// OSXER APPKIT (activity tokens): the power-policy bits are retained but no
+// host power assertion service is connected yet.
+typedef NS_OPTIONS(uint64_t, NSActivityOptions) {
+    NSActivityIdleDisplaySleepDisabled = 1ULL << 40,
+    NSActivityIdleSystemSleepDisabled = 1ULL << 20,
+    NSActivitySuddenTerminationDisabled = 1ULL << 14,
+    NSActivityAutomaticTerminationDisabled = 1ULL << 15,
+    NSActivityUserInitiated = 0x00FFFFFFULL | NSActivityIdleSystemSleepDisabled,
+    NSActivityUserInitiatedAllowingIdleSystemSleep = NSActivityUserInitiated & ~NSActivityIdleSystemSleepDisabled,
+    NSActivityBackground = 0x000000FFULL,
+    NSActivityLatencyCritical = 0xFF00000000ULL
+};
 @class NSArray, NSString, NSDictionary;
 
 @interface NSProcessInfo : NSObject
@@ -58,6 +70,10 @@ typedef NS_ENUM(NSInteger, NSProcessInfoThermalState) {
 - (BOOL)isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion)version;
 @property (readonly) NSProcessInfoThermalState thermalState;
 
+// OSXER APPKIT (activity tokens)
+- (id<NSObject>)beginActivityWithOptions:(NSActivityOptions)options reason:(NSString *)reason;
+- (void)endActivity:(id<NSObject>)activity;
+- (void)performActivityWithOptions:(NSActivityOptions)options reason:(NSString *)reason usingBlock:(void (^)(void))block;
 // OSXER APPKIT (public compatibility)
 - (void)disableAutomaticTermination:(NSString *)reason;
 - (void)enableAutomaticTermination:(NSString *)reason;

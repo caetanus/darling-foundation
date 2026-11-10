@@ -173,11 +173,11 @@ static void _encodeObject(NSKeyedArchiver *archiver, id object, NSString *key)
     }
 
     Class class = [object classForKeyedArchiver];
-    if ([archiver requiresSecureCoding])
-    {
-        // TODO secureCoding
-        DEBUG_BREAK();
-    }
+    // OSXER APPKIT (secure encoding): check every encoded object's archive
+    // class, including replacements, rather than only checking the root.
+    if (object && [archiver requiresSecureCoding] &&
+        (![class respondsToSelector:@selector(supportsSecureCoding)] || ![class supportsSecureCoding]))
+        [NSException raise:NSInvalidArchiveOperationException format:@"%@ does not support secure coding", class];
     int end = CFArrayGetCount((CFArrayRef)archiver->_objects);
     if (object == nil)
     {
@@ -478,66 +478,20 @@ static void encodeDouble(NSKeyedArchiver *archiver, double d, NSString *key)
     return success;
 }
 
-+ (NSData *)archivedDataWithRootObject:(id)object requiringSecureCoding:(BOOL)requiresSecureCoding error:(NSError * _Nullable *)error {
-    NSMutableDictionary<NSErrorUserInfoKey,id> *child_info = [[[NSMutableDictionary alloc] init] autorelease];
-    BOOL data_invalid = NO;
-    
-    // If the users requires secure coding, there will need to be a few checks. However if the
-    // object is nil, the secure coding checking will not occur.
-    
-    if (requiresSecureCoding && object) {
-        if (![object conformsToProtocol:@protocol(NSSecureCoding)]) {
-            [child_info
-                setObject: [NSString stringWithFormat:@"%@ %@ %@",
-                    @"This decoder requires the class to conform to NSSecuringCoding.",
-                    [object className],
-                    @"does not conform to it."]
-                forKey:NSDebugDescriptionErrorKey];
-            data_invalid = YES;
-        }
-        
-        else if (![[object class] supportsSecureCoding]) {
-            [child_info
-             setObject: [NSString stringWithFormat:@"%@ %@ %@",
-                         [object className],
-                         @"does not return YES for the property supportsSecureCoding.",
-                         @"NSSecureCoding requires YES to be returned."]
-             forKey:NSDebugDescriptionErrorKey];
-            data_invalid = YES;
-        }
-    }
-    
-    // There may be a situation where an exception does occur during the archiving process.
-    // If so, we much store that exception into a NSError.
-    
-    if (!data_invalid) {
-        @try {
-            return [NSKeyedArchiver archivedDataWithRootObject:object];
-        }
-        
-        @catch (NSException *exception) {
-            [child_info
-             setObject: [NSString stringWithFormat:@"%@ '%@': %@\n%@",
-                         @"Exception occured while archiving",
-                         [object className],
-                         [exception reason],
-                         [NSThread callStackSymbols]]
-             forKey:NSDebugDescriptionErrorKey];
-        }
-    }
-    
-    // The following code below will execute if either 'data_invalid' is 'YES' or if an exception
-    // has occured. Under normal circumstances, this section should not be reached.
-    
-    if (error != nil) {
-        NSMutableDictionary<NSErrorUserInfoKey,id> *parent_info = [[[NSMutableDictionary alloc] init] autorelease];
-        
-        NSError *child_error = [NSError errorWithDomain:NSCocoaErrorDomain code:4864 userInfo:child_info];
-        [parent_info setObject:child_error forKey:NSUnderlyingErrorKey];
-        *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4866 userInfo:parent_info];
-    }
-
-    return nil;
+// OSXER APPKIT (secure encoding): propagate the requested mode to the encoder.
++ (NSData *)archivedDataWithRootObject:(id)object requiringSecureCoding:(BOOL)secure error:(NSError **)error {
+    if (error) *error = nil;
+    NSKeyedArchiver *encoder = nil;
+    NSData *data = nil;
+    @try {
+        encoder = [[self alloc] initRequiringSecureCoding:secure];
+        [encoder encodeObject:object forKey:NSKeyedArchiveRootObjectKey];
+        data = [[encoder encodedData] copy];
+    } @catch (NSException *exception) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4866
+            userInfo:@{NSLocalizedDescriptionKey:[exception reason] ?: @"Invalid archive object"}];
+    } @finally { [encoder release]; }
+    return [data autorelease];
 }
 
 + (NSData *)archivedDataWithRootObject:(id)rootObject
@@ -566,8 +520,9 @@ static void encodeDouble(NSKeyedArchiver *archiver, double d, NSString *key)
 
 - (id)initRequiringSecureCoding:(BOOL)requiringSecureCoding
 {
-#warning TODO: [NSKeyedArchiver initRequiringSecureCoding:]
-    return [self init];
+    // OSXER APPKIT (secure encoding)
+    if ((self = [self init])) [self setRequiresSecureCoding:requiringSecureCoding];
+    return self;
 }
 
 -(NSData *)encodedData

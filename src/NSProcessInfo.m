@@ -37,7 +37,48 @@ extern char ***_NSGetEnviron();
 // OSXER APPKIT (termination): use CoreFoundation's shared process counter.
 #import <CoreFoundation/ForFoundationOnly.h>
 
+// OSXER APPKIT (activity tokens): scoped termination assertions. The token owns
+// the matching balance, including when a caller drops it without endActivity:.
+@interface OSXERProcessActivity : NSObject {
+@public
+    NSProcessInfo *process;
+    NSActivityOptions options;
+    NSString *reason;
+    BOOL ended;
+}
+- (void)end;
+@end
+@implementation OSXERProcessActivity
+- (void)end {
+    @synchronized(self) {
+        if (ended) return;
+        ended = YES;
+        if (options & NSActivitySuddenTerminationDisabled) [process enableSuddenTermination];
+        if (options & NSActivityAutomaticTerminationDisabled) [process enableAutomaticTermination:reason];
+    }
+}
+- (void)dealloc { [self end]; [reason release]; [process release]; [super dealloc]; }
+@end
+
 @implementation NSProcessInfo
+// OSXER APPKIT (activity tokens): App Nap, scheduling and display/system sleep
+// flags require a host power backend and currently have no effect.
+- (id<NSObject>)beginActivityWithOptions:(NSActivityOptions)options reason:(NSString *)reason {
+    OSXERProcessActivity *activity = [[[OSXERProcessActivity alloc] init] autorelease];
+    activity->process = [self retain]; activity->reason = [reason copy]; activity->options = options;
+    if (options & NSActivitySuddenTerminationDisabled) [self disableSuddenTermination];
+    if (options & NSActivityAutomaticTerminationDisabled) [self disableAutomaticTermination:reason];
+    return activity;
+}
+- (void)endActivity:(id<NSObject>)activity {
+    if ([(id)activity isKindOfClass:[OSXERProcessActivity class]]) [(OSXERProcessActivity *)activity end];
+}
+- (void)performActivityWithOptions:(NSActivityOptions)options reason:(NSString *)reason usingBlock:(void (^)(void))block {
+    id activity = [[self beginActivityWithOptions:options reason:reason] retain];
+    @try { if (block) block(); }
+    @finally { [self endActivity:activity]; [activity release]; }
+}
+
 
 // OSXER APPKIT (termination): automatic termination has no host policy engine;
 // maintain the opt-out counter so activity state remains balanced.

@@ -11,6 +11,8 @@
 #import <math.h>
 #import <unistd.h>
 #import <stdio.h>
+#import <sys/stat.h>
+#import <Foundation/NSProcessInfo.h>
 #import <stdlib.h>
 #import <sys/param.h>
 #import <sys/mount.h>
@@ -524,14 +526,17 @@ static inline BOOL _NSFileAccessibleForMode(NSString *path, int mode)
 
 - (NSURL *)URLForDirectory:(NSSearchPathDirectory)directory inDomain:(NSSearchPathDomainMask)domain appropriateForURL:(NSURL *)url create:(BOOL)shouldCreate error:(NSError **)error
 {
-    // how is appropriateForURL come into play? it does not seem to be used...
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(directory, domain, YES);
+    // OSXER APPKIT (trash directory): guest home trash; volume-specific trash
+    // and Finder restore metadata are not supplied by the current filesystem layer.
+    NSArray *paths = directory == NSTrashDirectory && (domain & NSUserDomainMask) ?
+        @[NSHomeDirectory().stringByStandardizingPath] : NSSearchPathForDirectoriesInDomains(directory, domain, YES);
     if ([paths count] == 0)
     {
         return nil;
     }
 
     NSString *path = [paths objectAtIndex:0];
+    if (directory == NSTrashDirectory) path = [path stringByAppendingPathComponent:@".Trash"];
     NSURL *dirUrl = [NSURL fileURLWithPath:path];
     if (shouldCreate && ![self fileExistsAtPath:path] &&
         ![self createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:error])
@@ -1044,6 +1049,104 @@ static NSError *_NSErrorWithFilePathAndErrno(id path, int code)
             }];
     }
     return NO;
+}
+
+// OSXER APPKIT (file replacement): stage in the destination directory so the
+// final POSIX rename is atomic. Originals survive copy/metadata/rename failures.
+// Nonempty directory replacement needs a filesystem exchange primitive; do not
+// emulate it by deleting the original first.
+- (BOOL)replaceItemAtURL:(NSURL *)originalURL withItemAtURL:(NSURL *)newURL
+         backupItemName:(NSString *)backupName options:(NSFileManagerItemReplacementOptions)options
+       resultingItemURL:(NSURL **)result error:(NSError **)error {
+    if (result) *result = nil;
+    if (error) *error = nil;
+    if (![originalURL isFileURL] || ![newURL isFileURL]) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileWriteUnsupportedSchemeError userInfo:nil];
+        return NO;
+    }
+    NSString *original = [[originalURL path] stringByStandardizingPath], *replacement = [[newURL path] stringByStandardizingPath];
+    if ([original isEqual:replacement] || (backupName && (![backupName length] ||
+        ![[backupName lastPathComponent] isEqual:backupName] || [backupName isEqual:@"."] || [backupName isEqual:@".."]))) {
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EINVAL userInfo:nil];
+        return NO;
+    }
+    NSDictionary *attributes = [self attributesOfItemAtPath:original error:error];
+    NSDictionary *newAttributes = [self attributesOfItemAtPath:replacement error:error];
+    if (!attributes || !newAttributes) return NO;
+    if (![[attributes objectForKey:NSFileType] isEqual:NSFileTypeRegular] ||
+        ![[newAttributes objectForKey:NSFileType] isEqual:NSFileTypeRegular]) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFeatureUnsupportedError userInfo:nil];
+        return NO;
+    }
+    NSString *parent = [original stringByDeletingLastPathComponent];
+    NSString *backup = backupName ? [parent stringByAppendingPathComponent:backupName] : nil;
+    if ([backup isEqual:original] || [backup isEqual:replacement]) {
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EINVAL userInfo:nil];
+        return NO;
+    }
+    // Reserve a private sibling directory, so cleanup never removes an item
+    // another writer created at our proposed temporary filename.
+    char *template = strdup([[parent stringByAppendingPathComponent:@".osxer-replace.XXXXXX"] fileSystemRepresentation]);
+    if (!template || !mkdtemp(template)) {
+        int code = template ? errno : ENOMEM;
+        free(template);
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:code userInfo:nil];
+        return NO;
+    }
+    NSString *temporaryDirectory = [self stringWithFileSystemRepresentation:template length:strlen(template)];
+    free(template);
+    NSString *temporary = [temporaryDirectory stringByAppendingPathComponent:@"replacement"];
+    @try {
+        // The generic copyItem implementation currently copies data only. Use
+        // the existing lower copyfile layer for metadata as well as contents.
+        if (copyfile([replacement fileSystemRepresentation], [temporary fileSystemRepresentation], NULL, COPYFILE_ALL | COPYFILE_EXCL | COPYFILE_NOFOLLOW) != 0) {
+            if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil]; return NO;
+        }
+        if (!(options & NSFileManagerItemReplacementUsingNewMetadataOnly)) {
+            if (copyfile([original fileSystemRepresentation], [temporary fileSystemRepresentation], NULL, COPYFILE_METADATA) != 0) {
+                if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil];
+                return NO;
+            }
+            id modified = [newAttributes objectForKey:NSFileModificationDate];
+            if (modified && ![self setAttributes:@{NSFileModificationDate:modified} ofItemAtPath:temporary error:error]) return NO;
+        }
+        if (backup) {
+            if ([self attributesOfItemAtPath:backup error:NULL] && ![self removeItemAtPath:backup error:error]) return NO;
+            if (copyfile([original fileSystemRepresentation], [backup fileSystemRepresentation], NULL, COPYFILE_ALL | COPYFILE_EXCL | COPYFILE_NOFOLLOW) != 0) {
+                if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil]; return NO;
+            }
+        }
+        if (rename([temporary fileSystemRepresentation], [original fileSystemRepresentation]) != 0) {
+            if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:nil];
+            return NO;
+        }
+        if (result) *result = [NSURL fileURLWithPath:original];
+        if (![self removeItemAtPath:replacement error:error]) return NO;
+        if (backup && !(options & NSFileManagerItemReplacementWithoutDeletingBackupItem) &&
+            ![self removeItemAtPath:backup error:error]) return NO;
+        return YES;
+    } @finally { [self removeItemAtPath:temporaryDirectory error:NULL]; }
+}
+- (BOOL)trashItemAtURL:(NSURL *)url resultingItemURL:(NSURL **)result error:(NSError **)error {
+    if (result) *result = nil;
+    if (error) *error = nil;
+    if (![url isFileURL]) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileWriteUnsupportedSchemeError userInfo:nil];
+        return NO;
+    }
+    NSURL *trash = [self URLForDirectory:NSTrashDirectory inDomain:NSUserDomainMask appropriateForURL:url create:YES error:error];
+    if (!trash) return NO;
+    NSString *name = [[url path] lastPathComponent];
+    if (![name length] || [name isEqual:@"/"]) {
+        if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EINVAL userInfo:nil]; return NO;
+    }
+    NSURL *destination = [trash URLByAppendingPathComponent:name];
+    if ([self attributesOfItemAtPath:[destination path] error:NULL])
+        destination = [trash URLByAppendingPathComponent:[NSString stringWithFormat:@"%@ %@", name, [[NSProcessInfo processInfo] globallyUniqueString]]];
+    // A failed move (including EXDEV) preserves the source. No permanent-delete fallback.
+    if (![self moveItemAtURL:url toURL:destination error:error]) return NO;
+    if (result) *result = destination;
+    return YES;
 }
 
 - (BOOL)moveItemAtURL:(NSURL *)srcURL toURL:(NSURL *)dstURL error:(NSError **)error

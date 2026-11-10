@@ -61,6 +61,8 @@ typedef NS_ENUM(NSUInteger, NSSearchPathDirectory) {
     NSPreferencePanesDirectory = 22,
     NSApplicationScriptsDirectory = 23,
     NSItemReplacementDirectory = 99,
+    // OSXER APPKIT (trash directory)
+    NSTrashDirectory = 102,
     NSAllApplicationsDirectory = 100,
     NSAllLibrariesDirectory = 101
 };

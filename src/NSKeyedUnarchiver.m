@@ -26,6 +26,7 @@
 
 #import <Foundation/NSError.h>
 #import <Foundation/FoundationErrors.h>
+#import <Foundation/NSPropertyList.h>
 // OSXER APPKIT (secure convenience): NSError API below uses the existing decoder.
 // OSXER APPKIT (secure decoding): check before allocating a decoded class;
 // allowed superclasses include subclasses, but NSSecureCoding is mandatory.
@@ -845,10 +846,12 @@ static void setClassForClassName(Class cls, NSString *codedName)
 }
 + (id)unarchivedObjectOfClasses:(NSSet *)classes fromData:(NSData *)data error:(NSError **)error
 {
+    // OSXER APPKIT (secure entry points): report malformed input through NSError.
+    if (error) *error = nil;
     NSKeyedUnarchiver *decoder = nil;
     id result = nil;
     @try {
-        decoder = [[self alloc] initForReadingWithData:data];
+        decoder = [[self alloc] initForReadingFromData:data error:error];
         if (!decoder) [NSException raise:NSInvalidUnarchiveOperationException format:@"Invalid archive"];
         [decoder setRequiresSecureCoding:YES];
         result = [[decoder decodeObjectOfClasses:classes forKey:@"root"] retain];
@@ -1102,10 +1105,33 @@ static CFDictionaryValueCallBacks sNSCFDictionaryValueCallBacks = {
     return self;
 }
 
+// OSXER APPKIT (secure entry points): reject malformed archive envelopes before
+// entering the legacy decoder, which assumes dictionary and array containers.
 - (id)initForReadingFromData:(NSData *)data error:(NSError **)error
 {
-#warning TODO [NSKeyedUnarchiver initForReadingFromData:error:]
-    return [self initForReadingWithData: data];
+    if (error) *error = nil;
+    id plist = [data length] ? [NSPropertyListSerialization propertyListWithData:data
+        options:NSPropertyListImmutable format:NULL error:error] : nil;
+    if (![plist isKindOfClass:[NSDictionary class]] ||
+        ![[plist objectForKey:@"$objects"] isKindOfClass:[NSArray class]] ||
+        ![[plist objectForKey:@"$top"] isKindOfClass:[NSDictionary class]] ||
+        ![[plist objectForKey:@"$version"] isKindOfClass:[NSNumber class]] ||
+        [[plist objectForKey:@"$version"] integerValue] != NSKeyedArchiverPlistVersion) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4864
+            userInfo:@{NSLocalizedDescriptionKey:@"Invalid keyed archive"}];
+        [self release]; return nil;
+    }
+    @try {
+        self = [self initForReadingWithData:data];
+        if (self) [self setRequiresSecureCoding:YES];
+        else if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4864 userInfo:nil];
+        return self;
+    } @catch (NSException *exception) {
+        // The legacy initializer releases its receiver before raising on bad data.
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4864
+            userInfo:@{NSLocalizedDescriptionKey:[exception reason] ?: @"Invalid archive"}];
+        return nil;
+    }
 }
 
 - (id)init
@@ -1679,10 +1705,18 @@ static CFDictionaryValueCallBacks sNSCFDictionaryValueCallBacks = {
         }
         else
         {
+            // OSXER APPKIT (secure entry points): restore nesting on exceptions,
+            // and check primitives/cached replacements as well as allocated classes.
             [_helper->_allowedClasses addObject:classes];
-            id object= [self decodeObjectForKey:key];
-            [_helper->_allowedClasses removeLastObject];
-            return object;
+            @try {
+                id object = [self decodeObjectForKey:key];
+                if (object) {
+                    BOOL allowed = NO;
+                    for (Class cls in classes) if ([object isKindOfClass:cls]) { allowed = YES; break; }
+                    if (!allowed) [NSException raise:NSInvalidUnarchiveOperationException format:@"Unexpected decoded class %@", [object class]];
+                }
+                return object;
+            } @finally { [_helper->_allowedClasses removeLastObject]; }
         }
     }
     else
@@ -1707,6 +1741,31 @@ static CFDictionaryValueCallBacks sNSCFDictionaryValueCallBacks = {
     else
     {
         return [super decodeObjectOfClass:cls forKey:key];
+    }
+}
+
+// OSXER APPKIT (secure entry points): partial NSSecureCoding policy. Class
+// checks precede custom initializers, but this is not a hardened untrusted-data
+// boundary: decoder substitutions and every primitive nested read are not audited.
+- (id)decodeTopLevelObjectOfClasses:(NSSet *)classes forKey:(NSString *)key error:(NSError **)error {
+    if (error) *error = nil;
+    @try { return [self decodeObjectOfClasses:classes forKey:key]; }
+    @catch (NSException *exception) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4864
+            userInfo:@{NSLocalizedDescriptionKey:[exception reason] ?: @"Invalid archive"}];
+        return nil;
+    }
+}
+- (id)decodeTopLevelObjectOfClass:(Class)cls forKey:(NSString *)key error:(NSError **)error {
+    return [self decodeTopLevelObjectOfClasses:cls ? [NSSet setWithObject:cls] : [NSSet set] forKey:key error:error];
+}
+- (id)decodeTopLevelObjectForKey:(NSString *)key error:(NSError **)error {
+    if (error) *error = nil;
+    @try { return [self decodeObjectForKey:key]; }
+    @catch (NSException *exception) {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:4864
+            userInfo:@{NSLocalizedDescriptionKey:[exception reason] ?: @"Invalid archive"}];
+        return nil;
     }
 }
 
