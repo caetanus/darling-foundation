@@ -819,6 +819,12 @@ static inline CFComparisonResult NSIndexSetCompareEntry(RangeList *r1, RangeList
 
 - (NSUInteger)getIndexes:(NSUInteger *)indexBuffer maxCount:(NSUInteger)bufferSize inIndexRange:(NSRangePointer)range
 {
+    // OSXER APPKIT (index sets): an empty range made location + length - 1 underflow to the
+    // whole set (NSTableView removeRows dropped the selection of unaffected rows).
+    if (range && range->length == 0)
+    {
+        return 0;
+    }
     if (IS_EMPTY(self) || bufferSize == 0)
     {
         return 0;
@@ -879,7 +885,9 @@ static inline CFComparisonResult NSIndexSetCompareEntry(RangeList *r1, RangeList
 
 - (NSUInteger)countOfIndexesInRange:(NSRange)range
 {
-    if (IS_EMPTY(self))
+    // OSXER APPKIT (index sets): an empty range made location + length - 1 underflow to the
+    // whole set (NSTableView removeRows dropped the selection of unaffected rows).
+    if (IS_EMPTY(self) || range.length == 0)
     {
         return 0;
     }
@@ -1022,6 +1030,12 @@ static inline CFComparisonResult NSIndexSetCompareEntry(RangeList *r1, RangeList
 }
 - (BOOL)intersectsIndexesInRange:(NSRange)range
 {
+    // OSXER APPKIT (index sets): an empty range made location + length - 1 underflow to the
+    // whole set (NSTableView removeRows dropped the selection of unaffected rows).
+    if (range.length == 0)
+    {
+        return NO;
+    }
     if (IS_EMPTY(self))
     {
         return NO;

@@ -14,6 +14,42 @@
 #import <Foundation/NSString.h>
 
 #import <math.h>
+#import <Foundation/NSException.h>
+
+// OSXER APPKIT (backing alignment): keep public rectangle arithmetic in Foundation.
+static CGFloat OSXERAlignedComponent(CGFloat value, NSAlignmentOptions options,
+                                     unsigned bit, BOOL minimum) {
+    BOOL inward = (options & (1ULL << bit)) != 0;
+    BOOL outward = (options & (1ULL << (bit + 8))) != 0;
+    BOOL nearest = (options & (1ULL << (bit + 16))) != 0;
+    if (inward + outward + nearest > 1)
+        [NSException raise:NSInvalidArgumentException format:@"Conflicting rectangle alignment options"];
+    if (nearest) {
+        // Flipped y coordinates reverse the visual direction of half-pixel ties.
+        if ((options & NSAlignRectFlipped) && (bit == 1 || bit == 3)) return ceil(value - 0.5);
+        return floor(value + 0.5);
+    }
+    if (inward) return minimum ? ceil(value) : floor(value);
+    if (outward) return minimum ? floor(value) : ceil(value);
+    return value;
+}
+
+NSRect NSIntegralRectWithOptions(NSRect rect, NSAlignmentOptions options) {
+    CGFloat x = OSXERAlignedComponent(NSMinX(rect), options, 0, YES);
+    CGFloat y = OSXERAlignedComponent(NSMinY(rect), options, 1, YES);
+    CGFloat maxX = OSXERAlignedComponent(NSMaxX(rect), options, 2, NO);
+    CGFloat maxY = OSXERAlignedComponent(NSMaxY(rect), options, 3, NO);
+    CGFloat width = maxX - x, height = maxY - y;
+    if (options & (NSAlignWidthInward | NSAlignWidthOutward | NSAlignWidthNearest)) {
+        width = OSXERAlignedComponent(rect.size.width, options, 4, NO);
+        if (options & (NSAlignMaxXInward | NSAlignMaxXOutward | NSAlignMaxXNearest)) x = maxX - width;
+    }
+    if (options & (NSAlignHeightInward | NSAlignHeightOutward | NSAlignHeightNearest)) {
+        height = OSXERAlignedComponent(rect.size.height, options, 5, NO);
+        if (options & (NSAlignMaxYInward | NSAlignMaxYOutward | NSAlignMaxYNearest)) y = maxY - height;
+    }
+    return NSMakeRect(x, y, MAX(0, width), MAX(0, height));
+}
 
 /*
  *	Constant structs
