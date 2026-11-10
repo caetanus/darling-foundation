@@ -1,3 +1,5 @@
+// OSXER NIB (typed coder messages)
+#import <Foundation/NSCoder.h>
 //
 //  NSSortDescriptor.m
 //  Foundation
@@ -92,9 +94,10 @@ enum {
 
 - (id)initWithCoder:(NSCoder *)aDecoder
 {
-#warning TODO https://code.google.com/p/apportable/issues/detail?id=254
-    [self release];
-    return nil;
+    // OSXER NIB (keyed decoding)
+    return [self initWithKey:[aDecoder decodeObjectForKey:@"NSKey"]
+                   ascending:[aDecoder decodeBoolForKey:@"NSAscending"]
+                    selector:NSSelectorFromString([aDecoder decodeObjectForKey:@"NSSelector"])];
 }
 
 - (void)dealloc

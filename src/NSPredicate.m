@@ -116,7 +116,8 @@
 
 - (id)initWithCoder:(NSCoder *)decoder
 {
-    if (_NSPredicateKeyedArchiverCheck(decoder))
+    // OSXER NIB (predicate decoding): a keyed coder is the accepted case.
+    if (!_NSPredicateKeyedArchiverCheck(decoder))
     {
         [self release];
         return nil;
@@ -125,7 +126,8 @@
     self = [self init];
     if (self != nil)
     {
-        _predicateFlags = ~NSPredicateEvaluationBlocked;
+        // OSXER NIB (predicate decoding): retain the secure-decoding evaluation gate.
+        _predicateFlags = [decoder requiresSecureCoding] ? NSPredicateEvaluationBlocked : 0;
     }
     return self;
 }

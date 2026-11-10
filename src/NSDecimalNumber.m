@@ -762,6 +762,16 @@ SINGLETON_RR()
 
 @implementation NSDecimalNumberHandler
 
+// OSXER NIB (keyed decoding)
+- (id)initWithCoder:(NSCoder *)coder {
+    return [self initWithRoundingMode:[coder decodeIntForKey:@"NS.roundingmode"]
+        scale:[coder containsValueForKey:@"NS.scale"] ? [coder decodeIntForKey:@"NS.scale"] : NSDecimalNoScale
+        raiseOnExactness:[coder decodeBoolForKey:@"NS.raise.exactness"]
+        raiseOnOverflow:[coder decodeBoolForKey:@"NS.raise.overflow"]
+        raiseOnUnderflow:[coder decodeBoolForKey:@"NS.raise.underflow"]
+        raiseOnDivideByZero:[coder decodeBoolForKey:@"NS.raise.dividebyzero"]];
+}
+
 - (NSDecimalNumber *)exceptionDuringOperation:(SEL)method error:(NSCalculationError)error
                                   leftOperand:(NSDecimalNumber *)leftOperand
                                  rightOperand:(NSDecimalNumber *)rightOperand

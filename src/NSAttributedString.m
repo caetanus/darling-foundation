@@ -9,6 +9,7 @@
 #import "NSAttributedStringInternal.h"
 #import "NSStringInternal.h"
 #import <Foundation/NSPortCoder.h>
+#import <Foundation/NSKeyedArchiver.h> // OSXER NIB (keyed decoding exceptions)
 #import <dispatch/dispatch.h>
 
 @implementation NSAttributedString
@@ -27,6 +28,40 @@ CF_PRIVATE
 @end
 
 @implementation NSAttributedString (NSAttributedString)
+
+// OSXER NIB (keyed decoding)
+- (id)initWithCoder:(NSCoder *)coder {
+    NSString *string = [coder decodeObjectForKey:@"NSString"] ?: @"";
+    id attributes = [coder decodeObjectForKey:@"NSAttributes"];
+    NSArray *runs = [coder decodeObjectForKey:@"OSXERAttributeRuns"];
+    if (runs) {
+        NSMutableAttributedString *value = [[NSMutableAttributedString alloc] initWithString:string];
+        for (NSDictionary *run in runs) {
+            NSRange range = NSRangeFromString([run objectForKey:@"range"]);
+            if (range.location > [string length] || range.length > [string length] - range.location) {
+                [value release]; [self release];
+                [NSException raise:NSInvalidUnarchiveOperationException format:@"Invalid attributed string run"];
+            }
+            [value setAttributes:[run objectForKey:@"attributes"] range:range];
+        }
+        self = [self initWithAttributedString:value];
+        [value release];
+        return self;
+    }
+    return [self initWithString:string attributes:[attributes isKindOfClass:[NSDictionary class]] ? attributes : nil];
+}
+- (void)encodeWithCoder:(NSCoder *)coder {
+    [coder encodeObject:[self string] forKey:@"NSString"];
+    // Preserve every run in our own archives; never silently flatten attributes.
+    NSMutableArray *runs = [NSMutableArray array];
+    for (NSUInteger index = 0; index < [self length];) {
+        NSRange range;
+        NSDictionary *attributes = [self attributesAtIndex:index effectiveRange:&range];
+        [runs addObject:@{@"range":NSStringFromRange(range), @"attributes":attributes}];
+        index = NSMaxRange(range);
+    }
+    [coder encodeObject:runs forKey:@"OSXERAttributeRuns"];
+}
 
 OBJC_PROTOCOL_IMPL_PUSH
 - (NSString *)string

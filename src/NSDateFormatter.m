@@ -1,3 +1,6 @@
+// OSXER NIB (typed coder messages)
+#import <Foundation/FoundationErrors.h>
+#import <Foundation/NSCoder.h>
 //
 //  NSDateFormatter.m
 //  Foundation
@@ -16,6 +19,17 @@
 #import <Foundation/NSLocale.h>
 
 @implementation NSDateFormatter
+
+// OSXER NIB (keyed decoding)
+- (id)initWithCoder:(NSCoder *)coder {
+    if ((self = [self init])) {
+        NSDictionary *attributes = [coder decodeObjectForKey:@"NS.attributes"];
+        if (attributes) [_attributes addEntriesFromDictionary:attributes];
+        NSString *format = [coder decodeObjectForKey:@"NS.format"];
+        if (format) [self setDateFormat:format];
+    }
+    return self;
+}
 
 + (NSString *)localizedStringFromDate:(NSDate *)date dateStyle:(NSDateFormatterStyle)dateStyle timeStyle:(NSDateFormatterStyle)timeStyle
 {
@@ -72,10 +86,47 @@ static NSDateFormatterBehavior defaultBehavior = NSDateFormatterBehaviorDefault;
     [super dealloc];
 }
 
+// OSXER NIB (formatters): the NSFormatter overrides; NSFormatter itself raises.
+- (NSString *)stringForObjectValue:(id)obj
+{
+    return [obj isKindOfClass:[NSDate class]] ? [self stringFromDate:obj] : nil;
+}
+
+- (NSString *)editingStringForObjectValue:(id)obj
+{
+    return [self stringForObjectValue:obj];
+}
+
+// OSXER NIB (formatters): declared and called by -getObjectValue:forString:errorDescription:,
+// never implemented, so every parse raised "unrecognized selector" (Transmission's nibs).
+// Parses the whole string or *rangep, which comes back as the part consumed. An empty string
+// is a nil value, as on macOS.
+- (BOOL)getObjectValue:(out id *)obj forString:(NSString *)string range:(inout NSRange *)rangep error:(out NSError **)error
+{
+    NSRange whole = NSMakeRange(0, [string length]);
+    NSRange range = rangep ? *rangep : whole;
+    if (NSMaxRange(range) > whole.length) range = whole;
+    if (obj) *obj = nil;
+    if (error) *error = nil;
+    if (range.length == 0) return YES;
+    [self _regenerateFormatter];
+    CFRange cfRange = CFRangeMake(range.location, range.length);
+    id value = [(id)CFDateFormatterCreateDateFromString(kCFAllocatorDefault, _formatter, (CFStringRef)string, &cfRange) autorelease];
+    if (value == nil)
+    {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFormattingError
+            userInfo:@{NSLocalizedDescriptionKey: @"The value is invalid."}];
+        return NO;
+    }
+    if (rangep) *rangep = NSMakeRange(cfRange.location, cfRange.length);
+    if (obj) *obj = value;
+    return YES;
+}
+
 - (BOOL)getObjectValue:(out id *)obj forString:(NSString *)string errorDescription:(out NSString **)error
 {
     NSError *err = nil;
-    NSRange r;
+    NSRange r = NSMakeRange(0, [string length]); // OSXER NIB (formatters): was uninitialized
     BOOL success = [self getObjectValue:obj forString:string range:&r error:&err];
     if (error != NULL)
     {

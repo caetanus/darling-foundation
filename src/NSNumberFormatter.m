@@ -1,3 +1,6 @@
+// OSXER NIB (typed coder messages)
+#import <Foundation/FoundationErrors.h>
+#import <Foundation/NSCoder.h>
 //
 //  NSNumberFormatter.m
 //  Foundation
@@ -13,6 +16,34 @@
 #import <Foundation/NSLocale.h>
 
 @implementation NSNumberFormatter
+// OSXER NIB (number bounds): decoded limits participate in string conversion.
+- (NSNumber *)minimum { return [_attributes objectForKey:@"minimum"]; }
+- (NSNumber *)maximum { return [_attributes objectForKey:@"maximum"]; }
+- (void)setMinimum:(NSNumber *)value {
+    if (value) [_attributes setObject:value forKey:@"minimum"];
+    else [_attributes removeObjectForKey:@"minimum"];
+}
+- (void)setMaximum:(NSNumber *)value {
+    if (value) [_attributes setObject:value forKey:@"maximum"];
+    else [_attributes removeObjectForKey:@"maximum"];
+}
+
+// OSXER NIB (keyed decoding)
+- (id)initWithCoder:(NSCoder *)coder {
+    if ((self = [self init])) {
+        NSDictionary *attributes = [coder decodeObjectForKey:@"NS.attributes"];
+        if (attributes) [_attributes addEntriesFromDictionary:attributes];
+        if ([coder containsValueForKey:@"NS.allowsfloats"]) [self setAllowsFloats:[coder decodeBoolForKey:@"NS.allowsfloats"]];
+        if ([coder containsValueForKey:@"NS.hasthousands"]) [self setUsesGroupingSeparator:[coder decodeBoolForKey:@"NS.hasthousands"]];
+        if ([coder containsValueForKey:@"NS.decimal"]) [self setDecimalSeparator:[coder decodeObjectForKey:@"NS.decimal"]];
+        if ([coder containsValueForKey:@"NS.thousand"]) [self setGroupingSeparator:[coder decodeObjectForKey:@"NS.thousand"]];
+        if ([coder containsValueForKey:@"NS.min"]) [self setMinimum:[coder decodeObjectForKey:@"NS.min"]];
+        if ([coder containsValueForKey:@"NS.max"]) [self setMaximum:[coder decodeObjectForKey:@"NS.max"]];
+        if ([coder containsValueForKey:@"NS.positiveformat"]) [self setPositiveFormat:[coder decodeObjectForKey:@"NS.positiveformat"]];
+        if ([coder containsValueForKey:@"NS.negativeformat"]) [self setNegativeFormat:[coder decodeObjectForKey:@"NS.negativeformat"]];
+    }
+    return self;
+}
 
 + (NSString *)localizedStringFromNumber:(NSNumber *)num numberStyle:(NSNumberFormatterStyle)nstyle
 {
@@ -65,10 +96,50 @@ static NSNumberFormatterBehavior defaultBehavior = NSNumberFormatterBehaviorDefa
     [super dealloc];
 }
 
+// OSXER NIB (formatters): the NSFormatter overrides; NSFormatter itself raises.
+- (NSString *)stringForObjectValue:(id)obj
+{
+    return [obj isKindOfClass:[NSNumber class]] ? [self stringFromNumber:obj] : nil;
+}
+
+- (NSString *)editingStringForObjectValue:(id)obj
+{
+    return [self stringForObjectValue:obj];
+}
+
+// OSXER NIB (formatters): declared and called by -getObjectValue:forString:errorDescription:,
+// never implemented, so every parse raised "unrecognized selector" (Transmission's nibs).
+// Parses the whole string or *rangep, which comes back as the part consumed. An empty string
+// is a nil value, as on macOS.
+- (BOOL)getObjectValue:(out id *)obj forString:(NSString *)string range:(inout NSRange *)rangep error:(out NSError **)error
+{
+    NSRange whole = NSMakeRange(0, [string length]);
+    NSRange range = rangep ? *rangep : whole;
+    if (NSMaxRange(range) > whole.length) range = whole;
+    if (obj) *obj = nil;
+    if (error) *error = nil;
+    if (range.length == 0) return YES;
+    [self _regenerateFormatter];
+    CFRange cfRange = CFRangeMake(range.location, range.length);
+    id value = [(id)CFNumberFormatterCreateNumberFromString(kCFAllocatorDefault, _formatter, (CFStringRef)string, &cfRange,
+        [_attributes[@"parseIntegersOnly"] boolValue] ? kCFNumberFormatterParseIntegersOnly : 0) autorelease];
+    if (value && (([self minimum] && [value compare:[self minimum]] == NSOrderedAscending) ||
+                  ([self maximum] && [value compare:[self maximum]] == NSOrderedDescending))) value = nil;
+    if (value == nil)
+    {
+        if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFormattingError
+            userInfo:@{NSLocalizedDescriptionKey: @"The value is invalid."}];
+        return NO;
+    }
+    if (rangep) *rangep = NSMakeRange(cfRange.location, cfRange.length);
+    if (obj) *obj = value;
+    return YES;
+}
+
 - (BOOL)getObjectValue:(out id *)obj forString:(NSString *)string errorDescription:(out NSString **)errorStr
 {
     NSError *error = nil;
-    NSRange r;
+    NSRange r = NSMakeRange(0, [string length]); // OSXER NIB (formatters): was uninitialized
     BOOL success = [self getObjectValue:obj forString:string range:&r error:&error];
     if (errorStr != NULL)
     {
@@ -92,7 +163,11 @@ static NSNumberFormatterBehavior defaultBehavior = NSNumberFormatterBehaviorDefa
         return nil;
     }
     [self _regenerateFormatter];
-    return [(NSNumber *)CFNumberFormatterCreateNumberFromString(kCFAllocatorDefault, _formatter, (CFStringRef)string, NULL, [_attributes[@"parseIntegersOnly"] boolValue] ? kCFNumberFormatterParseIntegersOnly : 0) autorelease];
+    // OSXER NIB (number bounds)
+    NSNumber *value = [(NSNumber *)CFNumberFormatterCreateNumberFromString(kCFAllocatorDefault, _formatter, (CFStringRef)string, NULL, [_attributes[@"parseIntegersOnly"] boolValue] ? kCFNumberFormatterParseIntegersOnly : 0) autorelease];
+    if (([self minimum] && [value compare:[self minimum]] == NSOrderedAscending) ||
+        ([self maximum] && [value compare:[self maximum]] == NSOrderedDescending)) return nil;
+    return value;
 }
 
 - (NSNumberFormatterStyle)numberStyle

@@ -191,7 +191,29 @@ static int64_t _getInt(uint8_t **ptrptr)
         }
         return acc;
     }
-    DEBUG_BREAK();  // unrecognized key
+    // OSXER NIB (numbers): Apple converts reals and booleans for the integer decoders
+    // (truncating reals); this was DEBUG_BREAK (SIGILL) on nibs that archive e.g. a float
+    // where the decoder asks for an integer.
+    if (encodeKey == (kCFBinaryPlistMarkerReal | 3))
+    {
+        CFSwappedFloat64 swapped64;
+        memmove(&swapped64, ptr, 8);
+        *ptrptr += 9;
+        return (int64_t)CFConvertFloat64SwappedToHost(swapped64);
+    }
+    if (encodeKey == (kCFBinaryPlistMarkerReal | 2))
+    {
+        CFSwappedFloat32 swapped32;
+        memmove(&swapped32, ptr, 4);
+        *ptrptr += 5;
+        return (int64_t)CFConvertFloat32SwappedToHost(swapped32);
+    }
+    if (encodeKey == kCFBinaryPlistMarkerTrue || encodeKey == kCFBinaryPlistMarkerFalse)
+    {
+        *ptrptr += 1;
+        return encodeKey == kCFBinaryPlistMarkerTrue;
+    }
+    [NSException raise:NSInvalidUnarchiveOperationException format:@"Did not find a number (marker 0x%02x)", encodeKey];
     return 0;
 }
 
@@ -308,11 +330,7 @@ static double _decodeDouble(NSKeyedUnarchiver *unarchiver, NSString *key)
             [NSException raise:NSInvalidUnarchiveOperationException format:@"Did not find number for key %@", key];
             return 0;
         }
-        if (!CFNumberIsFloatType((CFNumberRef)val))
-        {
-            [NSException raise:NSInvalidUnarchiveOperationException format:@"Did not find floating point typed number for key %@", key];
-            return 0;
-        }
+        // OSXER NIB (numbers): integer values convert, as on macOS.
         double doubleVal = -1.0;
         if (!CFNumberGetValue((CFNumberRef)val, kCFNumberFloat64Type, &doubleVal))
         {
@@ -338,7 +356,21 @@ static double _decodeDouble(NSKeyedUnarchiver *unarchiver, NSString *key)
         memmove(&swapped32, ptr + 1, 4);
         return (double)CFConvertFloat32SwappedToHost(swapped32);
     }
-    DEBUG_BREAK(); // Should never get here
+    // OSXER NIB (numbers): Apple converts integer values for -decodeDoubleForKey: / Float;
+    // nibs store e.g. NSPeriodicDelay as an integer. This was DEBUG_BREAK (SIGILL).
+    if ((*ptr & 0xf0) == kCFBinaryPlistMarkerInt && (*ptr & 0x0f) <= 3)
+    {
+        unsigned count = 1u << (*ptr & 0x0f);
+        uint64_t value = 0;
+        for (unsigned i = 0; i < count; i++) value = (value << 8) | ptr[1 + i];
+        // 8-byte integers are signed; shorter ones are unsigned in the binary plist format.
+        return count == 8 ? (double)(int64_t)value : (double)value;
+    }
+    if (*ptr == kCFBinaryPlistMarkerFalse || *ptr == kCFBinaryPlistMarkerTrue)
+    {
+        return *ptr == kCFBinaryPlistMarkerTrue ? 1.0 : 0.0;
+    }
+    [NSException raise:NSInvalidUnarchiveOperationException format:@"Did not find number for key %@", key];
     return 0.0;
 }
 
