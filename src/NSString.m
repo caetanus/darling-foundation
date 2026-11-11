@@ -691,8 +691,14 @@ SINGLETON_RR()
 
 + (id)localizedStringWithFormat:(NSString *)format, ...
 {
-#warning TODO https://code.google.com/p/apportable/issues/detail?id=269
-    return nil;
+    // OSXER APPKIT (localized format): was "return nil" (Apportable TODO), so every string an
+    // app built with it was nil (Transmission's torrent counter raised in setStringValue:).
+    // Apple formats with the current locale (digit grouping, decimal separator).
+    va_list args;
+    va_start(args, format);
+    NSString *string = [[self alloc] initWithFormat:format locale:[NSLocale currentLocale] arguments:args];
+    va_end(args);
+    return [string autorelease];
 }
 
 + (id)stringWithCString:(const char *)cString encoding:(NSStringEncoding)enc
