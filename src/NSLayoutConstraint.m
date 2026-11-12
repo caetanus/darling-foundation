@@ -28,7 +28,21 @@
 @synthesize firstItem = _firstItem, secondItem = _secondItem;
 @synthesize firstAttribute = _firstAttribute, secondAttribute = _secondAttribute;
 @synthesize relation = _relation, multiplier = _multiplier;
-@synthesize constant = _constant, priority = _priority, identifier = _identifier;
+@synthesize identifier = _identifier;
+
+// OSXER APPKIT (auto layout): changing a constraint schedules its view's layout pass.
+- (CGFloat)constant { return _constant; }
+- (void)setConstant:(CGFloat)constant
+{
+    _constant = constant;
+    if ([_osxerOwner respondsToSelector:@selector(setNeedsLayout:)]) [_osxerOwner setNeedsLayout:YES];
+}
+- (NSLayoutPriority)priority { return _priority; }
+- (void)setPriority:(NSLayoutPriority)priority
+{
+    _priority = priority;
+    if ([_osxerOwner respondsToSelector:@selector(setNeedsLayout:)]) [_osxerOwner setNeedsLayout:YES];
+}
 
 - (id)init
 {
